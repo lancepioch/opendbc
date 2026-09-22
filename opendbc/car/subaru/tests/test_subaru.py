@@ -92,4 +92,4 @@ class TestSubaruAvailability(unittest.TestCase):
       for is_release in (False, True):
         with self.subTest(platform=platform, is_release=is_release):
           cp = CarInterface.get_params(platform, gen_empty_fingerprint(), [], False, is_release, False)
-          self.assertEqual(cp.dashcamOnly, is_release or platform != CAR.SUBARU_CROSSTREK_2025)
+          self.assertEqual(cp.dashcamOnly, is_release or platform not in (CAR.SUBARU_CROSSTREK_2025, CAR.SUBARU_OUTBACK_2023))
