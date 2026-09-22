@@ -20,7 +20,7 @@ class CarInterface(CarInterfaceBase):
     # - proper panda safety setup (use the correct cruise_activated bit, throttle from Throttle_Hybrid, etc)
     ret.dashcamOnly = bool(ret.flags & (SubaruFlags.PREGLOBAL | SubaruFlags.HYBRID))
     if ret.flags & SubaruFlags.LKAS_ANGLE:
-      ret.dashcamOnly = is_release or candidate != CAR.SUBARU_CROSSTREK_2025
+      ret.dashcamOnly = is_release or candidate not in (CAR.SUBARU_CROSSTREK_2025, CAR.SUBARU_OUTBACK_2023)
     ret.autoResumeSng = False
 
     # Detect infotainment message sent from the camera
