@@ -1,3 +1,4 @@
+from opendbc.car.structs import CarControlSP
 #!/usr/bin/env python3
 import enum
 import unittest
@@ -224,7 +225,8 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
       for sign in (-1, 1):
         with self.subTest(sign=sign, start_speed=start_speed, end_speed=end_speed):
           self.setUp()
-          ci = CarInterface(CarInterface.get_non_essential_params(platform))
+          cp = CarInterface.get_non_essential_params(platform)
+          ci = CarInterface(cp, CarInterface.get_non_essential_params_sp(cp, platform))
           ci.update([])
           angle = sign * measured
           for _ in range(6):
@@ -239,7 +241,7 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
             cc.latActive = frame not in (0, 50)
             self.safety.set_controls_allowed(cc.latActive)
             self.safety.set_timer(frame * 10000)
-            _, messages = ci.CC.update(cc.as_reader(), ci.CS, frame * 10000000)
+            _, messages = ci.CC.update(cc.as_reader(), CarControlSP(), ci.CS, frame * 10000000)
             for addr, data, bus in messages:
               if addr == SubaruMsg.ES_LKAS_ANGLE:
                 angle_messages += 1
