@@ -107,7 +107,8 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params_sp(stock_cp: structs.CarParams, ret: structs.CarParamsSP, candidate, fingerprint: dict[int, dict[int, int]],
                      car_fw: list[structs.CarParams.CarFw], alpha_long: bool, is_release_sp: bool, docs: bool) -> structs.CarParamsSP:
-    stock_cp.dashcamOnly = bool(stock_cp.flags & (SubaruFlags.LKAS_ANGLE | SubaruFlags.HYBRID))
+    # sunnypilot supports pre-global; angle LKAS cars keep the stock development gate from _get_params
+    stock_cp.dashcamOnly = bool(stock_cp.flags & SubaruFlags.HYBRID) or (bool(stock_cp.flags & SubaruFlags.LKAS_ANGLE) and stock_cp.dashcamOnly)
 
     if not stock_cp.flags & (SubaruFlags.GLOBAL_GEN2 | SubaruFlags.HYBRID):
       stock_cp.autoResumeSng = True
