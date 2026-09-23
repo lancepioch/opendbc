@@ -269,6 +269,15 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
               self.assertEqual(allowed, self._tx(self._angle_cmd_msg(angle_can / self.DEG_TO_CAN * sign, True)))
 
 
+  def test_acc_main_on_from_es_dashstatus(self):
+    # sunnypilot MADS: on angle LKAS cars CruiseControl->Cruise_On stays 0, the main switch comes from ES_DashStatus
+    for main_on in (True, False):
+      self._rx(self.packer.make_can_msg_safety("ES_DashStatus", SUBARU_CAM_BUS, {"Cruise_On": main_on}))
+      self.assertEqual(self.safety.get_acc_main_on(), main_on)
+      self._rx(self.packer.make_can_msg_safety("CruiseControl", self.ALT_MAIN_BUS, {"Cruise_On": not main_on}))
+      self.assertEqual(self.safety.get_acc_main_on(), main_on)
+
+
 class TestSubaruGen1AngleStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruAngleSafetyBase):
   FLAGS = SubaruSafetyFlags.LKAS_ANGLE
   TX_MSGS = lkas_tx_msgs(SUBARU_MAIN_BUS, SubaruMsg.ES_LKAS_ANGLE)

@@ -114,12 +114,14 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     bool cruise_engaged = GET_BIT(msg, 29U);
     pcm_cruise_check(cruise_engaged);
   }
-  if ((msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
-    if (!subaru_lkas_angle) {
-      bool cruise_engaged = (msg->data[5] >> 1) & 1U;
-      pcm_cruise_check(cruise_engaged);
-    }
+  if (!subaru_lkas_angle && (msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
+    bool cruise_engaged = (msg->data[5] >> 1) & 1U;
+    pcm_cruise_check(cruise_engaged);
     acc_main_on = GET_BIT(msg, 40U);
+  }
+  // LKAS_ANGLE cars: CruiseControl->Cruise_On stays 0, the main switch is reported by ES_DashStatus (camera bus)
+  if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_ES_DashStatus) && (msg->bus == SUBARU_CAM_BUS)) {
+    acc_main_on = GET_BIT(msg, 49U);
   }
 
   // update vehicle moving with any non-zero wheel speed
