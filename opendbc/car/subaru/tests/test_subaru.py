@@ -24,6 +24,38 @@ class TestSubaruFingerprint(unittest.TestCase):
           assert len(fw) == fw_size, f"{platform} {ecu}: {len(fw)} {fw_size}"
 
 
+class TestSubaruLkasReleaseOnCameraEdge(unittest.TestCase):
+  # EyeSight faults if the EPS keeps steering when the camera drops lane keep (SET_3 2->3) while ACC is off
+  def _steer_request(self, ci, cc):
+    while True:
+      _, msgs = ci.CC.update(cc.as_reader(), CarControlSP(), ci.CS, 0)
+      for addr, data, _ in msgs:
+        if addr == 0x124:
+          return (data[1] >> 4) & 1
+
+  def test_release_on_low_speed_edge_only_without_acc(self):
+    from opendbc.car.subaru.carcontroller import LKAS_RELEASE_FRAMES
+    for acc_enabled in (False, True):
+      with self.subTest(acc_enabled=acc_enabled):
+        cp = CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2023)
+        ci = CarInterface(cp, CarInterface.get_non_essential_params_sp(cp, CAR.SUBARU_OUTBACK_2023))
+        ci.update([])
+        ci.CS.out = structs.CarState(vEgo=15, vEgoRaw=15)
+        ci.CS.out.cruiseState.enabled = acc_enabled
+        cc = structs.CarControl(latActive=True)
+        ci.CS.cam_lkas_mode = 2
+        self.assertEqual([self._steer_request(ci, cc) for _ in range(3)], [1, 1, 1])
+        ci.CS.cam_lkas_mode = 3
+        reqs = [self._steer_request(ci, cc) for _ in range(LKAS_RELEASE_FRAMES + 3)]
+        if acc_enabled:
+          self.assertEqual(reqs, [1] * (LKAS_RELEASE_FRAMES + 3))
+        else:
+          self.assertEqual(reqs, [0] * LKAS_RELEASE_FRAMES + [1, 1, 1])
+        # staying in mode 3, or going back up to 2, never releases again
+        ci.CS.cam_lkas_mode = 2
+        self.assertEqual([self._steer_request(ci, cc) for _ in range(3)], [1, 1, 1])
+
+
 class TestSubaruAngleLimits(unittest.TestCase):
   def setUp(self):
     cp = get_safety_CP()

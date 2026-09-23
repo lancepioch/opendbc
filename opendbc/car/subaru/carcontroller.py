@@ -15,6 +15,12 @@ from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
+# EyeSight latches a cruise fault if the EPS is still steering when the camera drops lane keep at its low-speed
+# threshold (its own ES_LKAS_ANGLE SET_3 goes 2->3) while ACC is inactive. Stock never steers there; MADS does.
+# Release the steering request for a moment on that edge so the EPS lets go like stock, then resume.
+# ponytail: 1 s is a guess from one fault log (2023 Outback), tune if EyeSight still faults or the gap feels long
+LKAS_RELEASE_FRAMES = 50  # steering frames (50 Hz)
+
 
 def get_safety_CP():
   # Use the Ascent for lateral limiting to match safety (most restrictive slip factor)
@@ -31,6 +37,8 @@ class CarController(CarControllerBase, SnGCarController):
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
+    self.cam_lkas_mode_prev = None
+    self.lkas_release_frames = 0
 
     self.p = CarControllerParams(CP)
     self.packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
@@ -48,19 +56,28 @@ class CarController(CarControllerBase, SnGCarController):
     # *** steering ***
     if (self.frame % self.p.STEER_STEP) == 0:
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
+        lat_active = CC.latActive
+        cam_lkas_mode = getattr(CS, 'cam_lkas_mode', None)
+        if cam_lkas_mode == 3 and self.cam_lkas_mode_prev == 2 and not CS.out.cruiseState.enabled:
+          self.lkas_release_frames = LKAS_RELEASE_FRAMES
+        self.cam_lkas_mode_prev = cam_lkas_mode
+        if self.lkas_release_frames > 0:
+          self.lkas_release_frames -= 1
+          lat_active = False
+
         apply_angle = actuators.steeringAngleDeg
         # prevent small angle oscillations near standstill
-        if CC.latActive and CS.out.vEgoRaw < 4.0:
+        if lat_active and CS.out.vEgoRaw < 4.0:
           apply_angle = self.apply_angle_last + apply_center_deadzone(apply_angle - self.apply_angle_last, 2.5)
         # Use filtered speed to smooth changes in the dynamic angle limit.
         apply_angle = apply_steer_angle_limits_vm(apply_angle, self.apply_angle_last, CS.out.vEgo,
-                                                 CS.out.steeringAngleDeg, CC.latActive, self.p, self.VM)
-        if CC.latActive:
+                                                 CS.out.steeringAngleDeg, lat_active, self.p, self.VM)
+        if lat_active:
           # Preserve the jerk limit when the previous angle is outside the acceleration bound.
           max_delta = min(get_max_angle_delta_vm(max(CS.out.vEgo, 1), self.VM, self.p), self.p.ANGLE_LIMITS.MAX_ANGLE_RATE)
           apply_angle = rate_limit(apply_angle, self.apply_angle_last, -max_delta, max_delta)
         self.apply_angle_last = apply_angle
-        can_sends.append(subarucan.create_steering_control_angle(self.packer, self.apply_angle_last, CC.latActive))
+        can_sends.append(subarucan.create_steering_control_angle(self.packer, self.apply_angle_last, lat_active))
       else:
         apply_torque = int(round(actuators.torque * self.p.STEER_MAX))
 

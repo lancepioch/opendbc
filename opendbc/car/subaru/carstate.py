@@ -125,6 +125,9 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
                      (cp_cam.vl["ES_LKAS_State"]["LKAS_Alert"] == 2)
 
       self.es_lkas_state_msg = copy.copy(cp_cam.vl["ES_LKAS_State"])
+      if self.CP.flags & SubaruFlags.LKAS_ANGLE:
+        # camera's lane keep mode: 2 above its ~36 mph threshold, 3 below (see carcontroller)
+        self.cam_lkas_mode = int(cp_cam.vl["ES_LKAS_ANGLE"]["SET_3"])
       self.es_brake_msg = copy.copy(cp_es_brake.vl["ES_Brake"])
 
       # TODO: Hybrid cars don't have ES_Distance, need a replacement
