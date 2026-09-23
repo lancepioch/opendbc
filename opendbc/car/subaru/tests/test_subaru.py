@@ -23,6 +23,45 @@ class TestSubaruFingerprint(unittest.TestCase):
           assert len(fw) == fw_size, f"{platform} {ecu}: {len(fw)} {fw_size}"
 
 
+class TestSubaruNoEngageOutsideAngleBound(unittest.TestCase):
+  # engaging with the wheel beyond the panda's lateral accel bound would be blocked frame after frame
+  def _steer_request(self, ci, cc):
+    while True:
+      _, msgs = ci.CC.update(cc.as_reader(), ci.CS, 0)
+      for addr, data, _ in msgs:
+        if addr == 0x124:
+          return (data[1] >> 4) & 1
+
+  def test_waits_for_wheel_inside_bound(self):
+    speed = 13.4
+    ci = CarInterface(CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2023))
+    ci.update([])
+    bound = get_max_angle_vm(speed - 1.0, ci.CC.VM, ci.CC.p)
+    cc = structs.CarControl(latActive=True)
+    cc.actuators.steeringAngleDeg = 0.0
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=-(bound + 5))
+    self.assertEqual([self._steer_request(ci, cc) for _ in range(3)], [0, 0, 0])
+    self.assertAlmostEqual(ci.CC.apply_angle_last, -(bound + 5), places=3)
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=-(bound - 5))
+    self.assertEqual(self._steer_request(ci, cc), 0)
+    self.assertEqual(self._steer_request(ci, cc), 1)
+    self.assertLess(abs(ci.CC.apply_angle_last), bound)
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=-(bound + 5))
+    self.assertEqual(self._steer_request(ci, cc), 1)
+    self.assertLessEqual(abs(ci.CC.apply_angle_last), bound)
+
+  def test_engages_inside_bound_immediately(self):
+    speed = 13.24
+    ci = CarInterface(CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2023))
+    ci.update([])
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=57.61)
+    cc = structs.CarControl(latActive=False)
+    self._steer_request(ci, cc)
+    cc.latActive = True
+    cc.actuators.steeringAngleDeg = 51.6
+    self.assertEqual(self._steer_request(ci, cc), 1)
+
+
 class TestSubaruAngleLimits(unittest.TestCase):
   def setUp(self):
     cp = get_safety_CP()

@@ -2,7 +2,7 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, make_tester_present_msg, rate_limit
 from opendbc.car.lateral import (apply_center_deadzone, apply_driver_steer_torque_limits, apply_steer_angle_limits_vm,
-                               common_fault_avoidance, get_max_angle_delta_vm)
+                               common_fault_avoidance, get_max_angle_delta_vm, get_max_angle_vm)
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import CAR, DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
@@ -28,6 +28,7 @@ class CarController(CarControllerBase):
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
+    self.lat_active_prev = False
 
     self.p = CarControllerParams(CP)
     self.packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
@@ -45,19 +46,31 @@ class CarController(CarControllerBase):
     # *** steering ***
     if (self.frame % self.p.STEER_STEP) == 0:
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
+        lat_active = CC.latActive
+        # The panda rejects any active frame outside its lateral accel angle bound (evaluated 1 m/s below its
+        # measured speed) and then re-anchors to the measured angle, so engaging with the wheel beyond the bound
+        # blocks every frame until the EPS faults (2023 Outback, 30 mph roundabout, wheel at 67 deg vs a 57 deg
+        # bound). Wait to engage until the wheel is inside the bound, mirroring the panda's 1 m/s speed fudge;
+        # once engaged the clipped target keeps the command inside.
+        if lat_active and not self.lat_active_prev:
+          max_angle = get_max_angle_vm(max(CS.out.vEgo - 1.0, 1), self.VM, self.p)
+          if max(abs(self.apply_angle_last), abs(CS.out.steeringAngleDeg)) > max_angle:
+            lat_active = False
+        self.lat_active_prev = lat_active
+
         apply_angle = actuators.steeringAngleDeg
         # prevent small angle oscillations near standstill
-        if CC.latActive and CS.out.vEgoRaw < 4.0:
+        if lat_active and CS.out.vEgoRaw < 4.0:
           apply_angle = self.apply_angle_last + apply_center_deadzone(apply_angle - self.apply_angle_last, 2.5)
         # Use filtered speed to smooth changes in the dynamic angle limit.
         apply_angle = apply_steer_angle_limits_vm(apply_angle, self.apply_angle_last, CS.out.vEgo,
-                                                 CS.out.steeringAngleDeg, CC.latActive, self.p, self.VM)
-        if CC.latActive:
+                                                 CS.out.steeringAngleDeg, lat_active, self.p, self.VM)
+        if lat_active:
           # Preserve the jerk limit when the previous angle is outside the acceleration bound.
           max_delta = min(get_max_angle_delta_vm(max(CS.out.vEgo, 1), self.VM, self.p), self.p.ANGLE_LIMITS.MAX_ANGLE_RATE)
           apply_angle = rate_limit(apply_angle, self.apply_angle_last, -max_delta, max_delta)
         self.apply_angle_last = apply_angle
-        can_sends.append(subarucan.create_steering_control_angle(self.packer, self.apply_angle_last, CC.latActive))
+        can_sends.append(subarucan.create_steering_control_angle(self.packer, self.apply_angle_last, lat_active))
       else:
         apply_torque = int(round(actuators.torque * self.p.STEER_MAX))
 
