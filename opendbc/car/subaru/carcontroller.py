@@ -2,7 +2,7 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, make_tester_present_msg, rate_limit
 from opendbc.car.lateral import (apply_center_deadzone, apply_driver_steer_torque_limits, apply_steer_angle_limits_vm,
-                               common_fault_avoidance, get_max_angle_delta_vm)
+                               common_fault_avoidance, get_max_angle_delta_vm, get_max_angle_vm)
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import CAR, DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
@@ -39,6 +39,7 @@ class CarController(CarControllerBase, SnGCarController):
     self.steer_rate_counter = 0
     self.cam_lkas_mode_prev = None
     self.lkas_release_frames = 0
+    self.lat_active_prev = False
 
     self.p = CarControllerParams(CP)
     self.packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
@@ -64,6 +65,17 @@ class CarController(CarControllerBase, SnGCarController):
         if self.lkas_release_frames > 0:
           self.lkas_release_frames -= 1
           lat_active = False
+
+        # The panda rejects any active frame outside its lateral accel angle bound (evaluated 1 m/s below its
+        # measured speed) and then re-anchors to the measured angle, so engaging or resuming with the wheel beyond
+        # the bound blocks every frame until the EPS faults (2023 Outback, 30 mph roundabout, wheel at 67 deg vs a
+        # 57 deg bound). Wait to engage until the wheel is inside the bound, mirroring the panda's 1 m/s speed
+        # fudge; once engaged the clipped target keeps the command inside.
+        if lat_active and not self.lat_active_prev:
+          max_angle = get_max_angle_vm(max(CS.out.vEgo - 1.0, 1), self.VM, self.p)
+          if max(abs(self.apply_angle_last), abs(CS.out.steeringAngleDeg)) > max_angle:
+            lat_active = False
+        self.lat_active_prev = lat_active
 
         apply_angle = actuators.steeringAngleDeg
         # prevent small angle oscillations near standstill

@@ -56,6 +56,51 @@ class TestSubaruLkasReleaseOnCameraEdge(unittest.TestCase):
         self.assertEqual([self._steer_request(ci, cc) for _ in range(3)], [1, 1, 1])
 
 
+class TestSubaruNoEngageOutsideAngleBound(unittest.TestCase):
+  # engaging with the wheel beyond the panda's lateral accel bound would be blocked frame after frame
+  def _steer_request(self, ci, cc):
+    while True:
+      _, msgs = ci.CC.update(cc.as_reader(), CarControlSP(), ci.CS, 0)
+      for addr, data, _ in msgs:
+        if addr == 0x124:
+          return (data[1] >> 4) & 1
+
+  def test_waits_for_wheel_inside_bound(self):
+    speed = 13.4
+    cp = CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2023)
+    ci = CarInterface(cp, CarInterface.get_non_essential_params_sp(cp, CAR.SUBARU_OUTBACK_2023))
+    ci.update([])
+    bound = get_max_angle_vm(speed - 1.0, ci.CC.VM, ci.CC.p)
+    cc = structs.CarControl(latActive=True)
+    cc.actuators.steeringAngleDeg = 0.0
+    # wheel outside the bound (a tight roundabout): keep tracking it inactive
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=-(bound + 5))
+    self.assertEqual([self._steer_request(ci, cc) for _ in range(3)], [0, 0, 0])
+    self.assertAlmostEqual(ci.CC.apply_angle_last, -(bound + 5), places=3)
+    # wheel back inside: engage and ramp from the last transmitted angle
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=-(bound - 5))
+    self.assertEqual(self._steer_request(ci, cc), 0)  # this frame still tracks the new measurement
+    self.assertEqual(self._steer_request(ci, cc), 1)
+    self.assertLess(abs(ci.CC.apply_angle_last), bound)
+    # the driver pushing beyond the bound while engaged does not drop the request; the command stays inside
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=-(bound + 5))
+    self.assertEqual(self._steer_request(ci, cc), 1)
+    self.assertLessEqual(abs(ci.CC.apply_angle_last), bound)
+
+  def test_engages_inside_bound_immediately(self):
+    # the upstream engage-above-nominal-bound case (57.6 deg at 13.24 m/s) is inside the panda's bound and must engage
+    speed = 13.24
+    cp = CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2023)
+    ci = CarInterface(cp, CarInterface.get_non_essential_params_sp(cp, CAR.SUBARU_OUTBACK_2023))
+    ci.update([])
+    ci.CS.out = structs.CarState(vEgo=speed, vEgoRaw=speed, steeringAngleDeg=57.61)
+    cc = structs.CarControl(latActive=False)
+    self._steer_request(ci, cc)
+    cc.latActive = True
+    cc.actuators.steeringAngleDeg = 51.6
+    self.assertEqual(self._steer_request(ci, cc), 1)
+
+
 class TestSubaruAngleLimits(unittest.TestCase):
   def setUp(self):
     cp = get_safety_CP()
