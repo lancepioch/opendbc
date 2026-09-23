@@ -64,6 +64,7 @@
 #define SUBARU_LKAS_ANGLE_RX_CHECKS(alt_bus) \
   SUBARU_COMMON_RX_CHECKS(alt_bus, MSG_SUBARU_ES_Status) \
   {.msg = {{MSG_SUBARU_Steering_2,      SUBARU_MAIN_BUS, 8, 50U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
+  {.msg = {{MSG_SUBARU_ES_DashStatus,   SUBARU_CAM_BUS,  8, 10U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},  \
 
 static bool subaru_gen2 = false;
 static bool subaru_lkas_angle = false;
